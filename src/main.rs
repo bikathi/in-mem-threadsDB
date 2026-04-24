@@ -1,4 +1,5 @@
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::Sender;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     collections::HashMap,
@@ -37,21 +38,13 @@ impl Operation {
     }
 }
 
-fn main() {
-    // init env_logger
-    env_logger::init();
-
-    // represents our in-mem DB
-    let db: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
-
-    // the poison pill to kill the app
-    let running = Arc::new(AtomicBool::new(true));
-
-    // this is the messaging channel
-    let (sender, receiver) = mpsc::channel::<String>();
-
-    // initialize the Monitor threads
-    for index in 1..=5 {
+fn create_threads(
+    max: usize,
+    sender: Sender<String>,
+    running: Arc<AtomicBool>,
+    db: &Arc<RwLock<HashMap<String, String>>>,
+) {
+    for index in 1..=max {
         let db_clone = Arc::clone(&db);
         let builder = Builder::new().name(format!("{}", index));
         let csender = sender.clone();
@@ -103,14 +96,29 @@ fn main() {
             }
         }
     }
+}
+
+fn main() {
+    // init env_logger
+    env_logger::init();
+
+    // represents our in-mem DB
+    let db: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+
+    // the poison pill to kill the app
+    let running = Arc::new(AtomicBool::new(true));
+
+    // this is the messaging channel
+    let (sender, receiver) = mpsc::channel::<String>();
+
+    // initialize the threads
+    create_threads(5, sender, running.clone(), &db);
 
     let handle = thread::spawn(move || {
         thread::sleep(Duration::from_secs(10));
         info!("Posion thread firing!");
         running.store(false, std::sync::atomic::Ordering::SeqCst);
     });
-
-    drop(sender);
 
     // the monitoring logic
     for received in receiver {
